@@ -77,4 +77,15 @@ export interface DocumentPdfPayload {
   company: CompanyData;
   lines: DocumentLineData[];
   generatedAt: string;
+
+  /** SHA-256 (primeros 12 chars, uppercase) de los campos estables del documento.
+   *  Sirve como comprobante de integridad en el sello del PDF. */
+  docHash?: string;
+
+  /** Payload compacto para el QR: `KR|{docType}|{docCode}|{hash}|{total}`. */
+  qrPayload?: string;
+
+  /** `true` si alguna línea tiene lotes/series — activa el bloque de
+   *  trazabilidad agregada en la plantilla. */
+  hasBatches?: boolean;
 }

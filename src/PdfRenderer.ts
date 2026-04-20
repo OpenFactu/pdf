@@ -1,6 +1,10 @@
 import Handlebars from 'handlebars';
 import puppeteer, { Browser, PaperFormat } from 'puppeteer';
 import crypto from 'crypto';
+import QRCode from 'qrcode';
+// bwip-js no tiene tipos oficiales; la importación dinámica queda tolerante.
+// eslint-disable-next-line @typescript-eslint/no-var-requires
+const bwipjs = require('bwip-js');
 import { DocumentPdfPayload } from './types';
 import type { VisualOptions, PageSize, MarginPreset } from './visualOptionsSchema';
 
@@ -66,6 +70,54 @@ export class PdfRenderer {
 
     Handlebars.registerHelper('eq', (a: any, b: any) => a === b);
     Handlebars.registerHelper('gt', (a: any, b: any) => Number(a) > Number(b));
+
+    // QR como data URI de SVG. Uso síncrono vía QRCode.toString con type 'svg'.
+    Handlebars.registerHelper('qrCode', (value: any, _options: any) => {
+      try {
+        const text = String(value ?? '');
+        if (!text) return new Handlebars.SafeString('');
+        // qrcode no expone una versión síncrona oficial de toString; usamos
+        // la interna `create` para generar la matriz y pintamos el SVG a mano.
+        const qr = QRCode.create(text, { errorCorrectionLevel: 'M' });
+        const size = qr.modules.size;
+        let path = '';
+        for (let y = 0; y < size; y++) {
+          for (let x = 0; x < size; x++) {
+            if (qr.modules.get(x, y)) path += `M${x},${y}h1v1h-1z`;
+          }
+        }
+        const svg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${size} ${size}" preserveAspectRatio="none" shape-rendering="crispEdges"><rect width="100%" height="100%" fill="#fff"/><path fill="#000" d="${path}"/></svg>`;
+        return new Handlebars.SafeString(
+          `data:image/svg+xml;base64,${Buffer.from(svg).toString('base64')}`,
+        );
+      } catch {
+        return new Handlebars.SafeString('');
+      }
+    });
+
+    // Barcode 1D — usa bwip-js a SVG.
+    Handlebars.registerHelper('barcode', function (this: any, value: any, options: any) {
+      try {
+        const text = String(value ?? '');
+        if (!text) return new Handlebars.SafeString('');
+        const hash = options?.hash || {};
+        const symbology = (hash.symbology as string) || 'code128';
+        const includeText = Boolean(hash.includeText);
+        const svg = bwipjs.toSVG({
+          bcid: symbology,
+          text,
+          scale: 2,
+          height: 10,
+          includetext: includeText,
+          textxalign: 'center',
+        });
+        return new Handlebars.SafeString(
+          `data:image/svg+xml;base64,${Buffer.from(svg).toString('base64')}`,
+        );
+      } catch {
+        return new Handlebars.SafeString('');
+      }
+    });
 
     this.helpersRegistered = true;
   }

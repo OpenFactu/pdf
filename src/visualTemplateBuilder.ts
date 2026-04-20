@@ -14,11 +14,21 @@ import { serializeMeta } from './metaParser';
 // CONFIG TABLES
 // ============================================================================
 
+// Fuentes Keirost brand guide v1.0: Space Grotesk (display), DM Sans (body),
+// JetBrains Mono (código). Cargadas desde Google Fonts en el <head> del PDF.
 const FONT_FAMILY_CSS: Record<VisualOptions['fontFamily'], string> = {
-  sans: `-apple-system, 'Segoe UI', Helvetica, Arial, sans-serif`,
+  sans: `'DM Sans', -apple-system, 'Segoe UI', Helvetica, Arial, sans-serif`,
   serif: `Georgia, 'Times New Roman', Times, serif`,
-  mono: `'SFMono-Regular', Menlo, Monaco, 'Courier New', monospace`,
+  mono: `'JetBrains Mono', 'SFMono-Regular', Menlo, Monaco, 'Courier New', monospace`,
 };
+
+const DISPLAY_FONT = `'Space Grotesk', 'DM Sans', system-ui, sans-serif`;
+const MONO_FONT = `'JetBrains Mono', 'SFMono-Regular', Menlo, monospace`;
+
+// <link> de Google Fonts incluido en todas las plantillas. Puppeteer lo
+// descarga al renderizar — imprescindible para que Space Grotesk esté
+// disponible en el PDF.
+const GOOGLE_FONTS_LINK = `<link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin><link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=DM+Sans:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">`;
 
 const PAGE_SIZE_CSS: Record<PageSize, string> = {
   A4: 'A4',
@@ -175,10 +185,16 @@ export function buildVisualTemplate(docType: DocType, opts: VisualOptions): stri
 
   const bodyCells: string[] = [];
   if (col.code) bodyCells.push('<td class="mono">{{itemCode}}</td>');
-  if (col.description)
+  if (col.description) {
+    // Bloque de trazabilidad dentro de la celda de descripción: si la línea
+    // tiene lotes o series, los listamos debajo del nombre en compacto.
+    const tracingInline = opts.showBatches
+      ? `{{#if batches.length}}<div class="trace-inline">{{#each batches}}<span class="trace-chip">⬢ {{batchNum}} <em>×{{formatNumber quantity 2}}</em></span>{{/each}}</div>{{/if}}`
+      : '';
     bodyCells.push(
-      `<td><strong>{{itemName}}</strong>{{#if itemDescription}}<br><small class="muted">{{itemDescription}}</small>{{/if}}</td>`,
+      `<td><strong>{{itemName}}</strong>{{#if itemDescription}}<br><small class="muted">{{itemDescription}}</small>{{/if}}${tracingInline}</td>`,
     );
+  }
   if (col.quantity) bodyCells.push('<td class="num">{{formatNumber quantity 2}}</td>');
   if (col.uom) bodyCells.push('<td class="num">{{uom}}</td>');
   if (col.price) bodyCells.push('<td class="num">{{formatCurrency price}}</td>');
@@ -197,18 +213,64 @@ export function buildVisualTemplate(docType: DocType, opts: VisualOptions): stri
     ? `{{#if doc.totalInWords}}<div class="total-in-words"><em>{{doc.totalInWords}}</em></div>{{/if}}`
     : '';
 
+  // === Bloque de trazabilidad agregada (lotes/series por línea) ===
+  // Agrupamos todos los lotes del documento en una tabla al final — da una
+  // vista consolidada que facilita el control de cadena de custodia.
+  const batchSummaryBlock = opts.showBatches
+    ? `{{#if hasBatches}}
+    <section class="trace-block">
+      <h3 class="trace-title">Trazabilidad — Lotes / números de serie</h3>
+      <table class="trace-table">
+        <thead><tr><th>Artículo</th><th>Lote / Serie</th><th class="num">Cantidad</th></tr></thead>
+        <tbody>
+          {{#each lines}}{{#if batches.length}}{{#each batches}}
+          <tr>
+            <td><span class="mono">{{../itemCode}}</span> {{../itemName}}</td>
+            <td class="mono">{{batchNum}}</td>
+            <td class="num">{{formatNumber quantity 2}}</td>
+          </tr>
+          {{/each}}{{/if}}{{/each}}
+        </tbody>
+      </table>
+    </section>
+    {{/if}}`
+    : '';
+
+  // === Sello + códigos de trazabilidad del documento ===
+  const traceCodesBlock =
+    opts.showDocBarcode || opts.showDocQr
+      ? `<aside class="doc-seal">
+      <div class="doc-seal__codes">
+        ${
+          opts.showDocQr
+            ? '<div class="doc-seal__code"><img src="{{qrCode qrPayload}}" alt="QR" /><span class="doc-seal__label">Verificación</span></div>'
+            : ''
+        }
+        ${
+          opts.showDocBarcode
+            ? '<div class="doc-seal__code doc-seal__code--bc"><img src="{{barcode doc.docCode symbology=\'code128\'}}" alt="Código" /><span class="doc-seal__label mono">{{doc.docCode}}</span></div>'
+            : ''
+        }
+      </div>
+      <div class="doc-seal__meta">
+        <div><strong>Hash:</strong> <span class="mono">{{docHash}}</span></div>
+        <div><strong>Emitido:</strong> {{generatedAt}}</div>
+      </div>
+    </aside>`
+      : '';
+
   // === Footer ===
   const footerAlign = alignToCss(opts.footer.alignment);
   const footerSegments: string[] = [];
   if (opts.footer.text) footerSegments.push(`<div>${opts.footer.text}</div>`);
   if (opts.footer.showGeneratedAt)
-    footerSegments.push('<div class="footer-meta">{{generatedAt}}</div>');
+    footerSegments.push('<div class="footer-meta">Generado {{generatedAt}}</div>');
   const footerBlock =
     footerSegments.length > 0
       ? `<div class="page-footer" style="text-align:${footerAlign};">${footerSegments.join('')}</div>`
       : '';
 
-  // === CSS ===
+  // === CSS — Keirost brand guide v1.0 ===
   const css = `
   ${watermarkCss}
   @page {
@@ -222,110 +284,233 @@ export function buildVisualTemplate(docType: DocType, opts: VisualOptions): stri
     font-size: ${opts.baseFontSize}pt;
     margin: 0;
     padding: 0;
-    line-height: 1.4;
+    line-height: 1.5;
+    -webkit-font-smoothing: antialiased;
   }
-  .mono { font-family: 'SFMono-Regular', Menlo, monospace; font-size: ${opts.baseFontSize - 1}pt; color: ${opts.mutedColor}; }
+  .mono { font-family: ${MONO_FONT}; font-size: ${opts.baseFontSize - 1}pt; color: ${opts.mutedColor}; }
   .muted { color: ${opts.mutedColor}; }
+
+  /* ---------- Cabecera ---------- */
   .page-header {
     display: flex;
     justify-content: space-between;
     align-items: flex-start;
-    border-bottom: 3px solid ${opts.headerBgColor};
-    padding-bottom: 16px;
-    margin-bottom: 20px;
+    border-bottom: 2px solid ${opts.headerBgColor};
+    padding-bottom: 14px;
+    margin-bottom: 22px;
     gap: 20px;
   }
   .page-header.logo-center { flex-direction: column; align-items: center; text-align: center; }
   .page-header.logo-right  { flex-direction: row-reverse; }
-  .company { display: flex; flex-direction: column; gap: 4px; max-width: 60%; }
-  .company h1 { font-size: ${opts.baseFontSize + 10}pt; font-weight: 800; margin: 0 0 4px 0; color: ${opts.headerBgColor}; letter-spacing: -0.3px; }
-  .company small { color: ${opts.mutedColor}; font-size: ${opts.baseFontSize - 1}pt; display: block; line-height: 1.3; }
+  .company { display: flex; flex-direction: column; gap: 2px; max-width: 60%; }
+  .company h1 {
+    font-family: ${DISPLAY_FONT};
+    font-size: ${opts.baseFontSize + 10}pt;
+    font-weight: 700;
+    margin: 0 0 4px 0;
+    color: ${opts.headerBgColor};
+    letter-spacing: -0.4px;
+  }
+  .company small { color: ${opts.mutedColor}; font-size: ${opts.baseFontSize - 1}pt; display: block; line-height: 1.35; }
   .company-logo { max-height: ${opts.logoMaxHeight}px; max-width: 240px; display: block; margin-bottom: 6px; }
   .doc-info { text-align: right; }
   .doc-info .tag {
     display: inline-block;
-    background: ${opts.headerBgColor};
+    background: ${opts.accentColor};
     color: white;
-    padding: 4px 12px;
+    padding: 3px 10px;
     font-size: ${opts.baseFontSize - 2}pt;
     font-weight: 700;
-    letter-spacing: 1.5px;
+    letter-spacing: 1.2px;
     text-transform: uppercase;
-    border-radius: 4px;
+    border-radius: 2px;
+    font-family: ${MONO_FONT};
   }
   .doc-info .code {
-    font-size: ${opts.baseFontSize + 4}pt;
-    font-weight: 800;
+    font-family: ${MONO_FONT};
+    font-size: ${opts.baseFontSize + 5}pt;
+    font-weight: 600;
     margin-top: 8px;
     color: ${opts.headerBgColor};
-    font-family: 'SFMono-Regular', Menlo, monospace;
+    letter-spacing: 0.2px;
   }
-  .doc-info .date { color: ${opts.mutedColor}; font-size: ${opts.baseFontSize - 1}pt; margin-top: 4px; }
-  .parties { display: flex; gap: 16px; margin-bottom: 22px; flex-wrap: wrap; }
+  .doc-info .date {
+    color: ${opts.mutedColor};
+    font-size: ${opts.baseFontSize - 1}pt;
+    margin-top: 4px;
+  }
+
+  /* ---------- Partes (emisor / receptor) ---------- */
+  .parties { display: flex; gap: 12px; margin-bottom: 20px; flex-wrap: wrap; }
   .party {
     flex: 1;
-    min-width: 200px;
-    background: #f8fafc;
-    border-radius: 8px;
-    padding: 12px 14px;
+    min-width: 220px;
+    background: #FAFBFC;
+    border: 1px solid #E2E8F0;
     border-left: 3px solid ${opts.accentColor};
+    border-radius: 4px;
+    padding: 11px 14px;
   }
   .party .label {
+    font-family: ${MONO_FONT};
     font-size: ${opts.baseFontSize - 3}pt;
-    font-weight: 800;
+    font-weight: 600;
     color: ${opts.mutedColor};
     text-transform: uppercase;
-    letter-spacing: 1.5px;
-    margin-bottom: 6px;
+    letter-spacing: 1.4px;
+    margin-bottom: 5px;
   }
-  .party .name { font-weight: 700; font-size: ${opts.baseFontSize + 1}pt; color: ${opts.headerBgColor}; margin-bottom: 4px; }
+  .party .name {
+    font-family: ${DISPLAY_FONT};
+    font-weight: 600;
+    font-size: ${opts.baseFontSize + 2}pt;
+    color: ${opts.headerBgColor};
+    margin-bottom: 4px;
+    letter-spacing: -0.1px;
+  }
   .party .meta { color: ${opts.mutedColor}; font-size: ${opts.baseFontSize - 1}pt; line-height: 1.4; }
-  table { width: 100%; border-collapse: collapse; margin-bottom: 16px; }
+
+  /* ---------- Tabla de líneas ---------- */
+  table { width: 100%; border-collapse: collapse; margin-bottom: 14px; }
   thead th {
     background: ${opts.headerBgColor};
     color: white;
     text-align: left;
-    padding: 9px 10px;
+    padding: 8px 10px;
     font-size: ${opts.baseFontSize - 2}pt;
-    font-weight: 700;
+    font-weight: 600;
     text-transform: uppercase;
-    letter-spacing: 0.8px;
+    letter-spacing: 0.9px;
+    font-family: ${MONO_FONT};
   }
   thead th.num { text-align: right; }
-  tbody td { padding: 9px 10px; border-bottom: 1px solid #e2e8f0; font-size: ${opts.baseFontSize - 1}pt; vertical-align: top; }
-  tbody td.num { text-align: right; font-variant-numeric: tabular-nums; }
-  tbody tr:nth-child(even) { background: #fafbfc; }
+  tbody td { padding: 9px 10px; border-bottom: 1px solid #E2E8F0; font-size: ${opts.baseFontSize - 1}pt; vertical-align: top; }
+  tbody td.num { text-align: right; font-variant-numeric: tabular-nums; font-family: ${MONO_FONT}; }
+  tbody tr:nth-child(even) { background: #FAFBFC; }
+
+  /* Chips de trazabilidad inline dentro de la descripción */
+  .trace-inline { margin-top: 4px; display: flex; flex-wrap: wrap; gap: 4px; }
+  .trace-chip {
+    display: inline-flex;
+    align-items: center;
+    gap: 3px;
+    background: ${opts.accentColor}14;
+    border: 1px solid ${opts.accentColor}40;
+    color: ${opts.accentColor};
+    font-family: ${MONO_FONT};
+    font-size: ${opts.baseFontSize - 3}pt;
+    padding: 1px 6px;
+    border-radius: 2px;
+  }
+  .trace-chip em { color: ${opts.headerBgColor}; font-style: normal; font-weight: 600; }
+
+  /* ---------- Totales ---------- */
   .totals { float: right; width: 300px; margin-top: 8px; }
-  .totals .row { display: flex; justify-content: space-between; padding: 6px 12px; font-size: ${opts.baseFontSize}pt; }
-  .totals .row.tax { color: ${opts.accentColor}; font-weight: 600; }
+  .totals .row {
+    display: flex;
+    justify-content: space-between;
+    padding: 5px 12px;
+    font-size: ${opts.baseFontSize}pt;
+  }
+  .totals .row.tax { color: ${opts.accentColor}; font-weight: 500; }
   .totals .row.grand {
     background: ${opts.headerBgColor};
     color: white;
-    font-size: ${opts.baseFontSize + 4}pt;
-    font-weight: 800;
-    padding: 12px 14px;
-    border-radius: 6px;
+    font-family: ${DISPLAY_FONT};
+    font-size: ${opts.baseFontSize + 5}pt;
+    font-weight: 700;
+    padding: 11px 14px;
+    border-radius: 4px;
     margin-top: 6px;
+    letter-spacing: 0.2px;
   }
   .total-in-words {
     clear: both;
     margin-top: 12px;
     padding: 10px 14px;
-    background: #f8fafc;
+    background: #FAFBFC;
     border-left: 3px solid ${opts.accentColor};
     color: ${opts.mutedColor};
     font-size: ${opts.baseFontSize - 1}pt;
     font-style: italic;
+    border-radius: 2px;
   }
+
+  /* ---------- Bloque de trazabilidad agregada ---------- */
+  .trace-block {
+    clear: both;
+    margin-top: 20px;
+    border: 1px solid #E2E8F0;
+    border-top: 2px solid ${opts.accentColor};
+    border-radius: 4px;
+    padding: 10px 14px 4px;
+    page-break-inside: avoid;
+  }
+  .trace-title {
+    font-family: ${DISPLAY_FONT};
+    font-size: ${opts.baseFontSize}pt;
+    font-weight: 600;
+    color: ${opts.headerBgColor};
+    margin: 0 0 8px 0;
+    letter-spacing: -0.1px;
+  }
+  .trace-table { width: 100%; border: 0; margin: 0; }
+  .trace-table thead th {
+    background: transparent;
+    color: ${opts.mutedColor};
+    padding: 4px 6px;
+    font-size: ${opts.baseFontSize - 3}pt;
+    border-bottom: 1px solid #E2E8F0;
+  }
+  .trace-table tbody td { padding: 4px 6px; font-size: ${opts.baseFontSize - 2}pt; border-bottom: 1px solid #F1F5F9; }
+  .trace-table tbody tr:nth-child(even) { background: transparent; }
+
+  /* ---------- Sello + QR + Code-128 ---------- */
+  .doc-seal {
+    clear: both;
+    margin-top: 24px;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 16px;
+    border-top: 1px solid #E2E8F0;
+    padding-top: 14px;
+    page-break-inside: avoid;
+  }
+  .doc-seal__codes { display: flex; gap: 14px; align-items: flex-end; }
+  .doc-seal__code { display: flex; flex-direction: column; align-items: center; gap: 2px; }
+  .doc-seal__code img { height: 56px; width: auto; display: block; }
+  .doc-seal__code--bc img { height: 36px; width: 160px; }
+  .doc-seal__label {
+    font-family: ${MONO_FONT};
+    font-size: ${opts.baseFontSize - 4}pt;
+    color: ${opts.mutedColor};
+    text-transform: uppercase;
+    letter-spacing: 1px;
+  }
+  .doc-seal__meta {
+    color: ${opts.mutedColor};
+    font-size: ${opts.baseFontSize - 2}pt;
+    text-align: right;
+    line-height: 1.6;
+  }
+  .doc-seal__meta strong {
+    color: ${opts.headerBgColor};
+    font-weight: 600;
+    letter-spacing: 0.2px;
+  }
+
+  /* ---------- Pie de página ---------- */
   .page-footer {
     clear: both;
-    margin-top: 40px;
-    padding-top: 12px;
-    border-top: 1px solid #e2e8f0;
+    margin-top: 18px;
+    padding-top: 10px;
+    border-top: 1px solid #E2E8F0;
     color: ${opts.mutedColor};
     font-size: ${opts.baseFontSize - 2}pt;
   }
-  .footer-meta { margin-top: 4px; font-size: ${opts.baseFontSize - 3}pt; opacity: 0.7; }
+  .footer-meta { margin-top: 3px; font-size: ${opts.baseFontSize - 3}pt; opacity: 0.8; font-family: ${MONO_FONT}; }
+
   ${opts.customCss}
   `;
 
@@ -336,6 +521,7 @@ export function buildVisualTemplate(docType: DocType, opts: VisualOptions): stri
 <head>
 <meta charset="UTF-8">
 <title>{{doc.docCode}}</title>
+${GOOGLE_FONTS_LINK}
 <style>${css}</style>
 </head>
 <body>
@@ -391,6 +577,10 @@ export function buildVisualTemplate(docType: DocType, opts: VisualOptions): stri
   </div>
 
   ${totalInWordsBlock}
+
+  ${batchSummaryBlock}
+
+  ${traceCodesBlock}
 
   ${footerBlock}
 </body>

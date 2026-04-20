@@ -70,6 +70,11 @@ export interface VisualOptions {
   showTaxBreakdown: boolean;
   showTotalInWords: boolean;
 
+  // Trazabilidad
+  showBatches: boolean;       // lotes/series bajo cada línea
+  showDocBarcode: boolean;    // Code-128 del número de documento
+  showDocQr: boolean;         // QR con payload de verificación
+
   // Columnas de la tabla
   columns: ColumnVisibility;
 
@@ -83,11 +88,15 @@ export interface VisualOptions {
   customCss: string;
 }
 
+// Paleta Keirost (brand guide v1.0)
+// - accent  = teal #0D9488
+// - ink-900 = #0A1628 (cabeceras, bloques destacados)
+// - ink-500 = #64748B (texto secundario)
 export const DEFAULT_VISUAL_OPTIONS: VisualOptions = {
-  accentColor: '#f59e0b',
-  headerBgColor: '#0f172a',
-  textColor: '#1e293b',
-  mutedColor: '#64748b',
+  accentColor: '#0D9488',
+  headerBgColor: '#0A1628',
+  textColor: '#0A1628',
+  mutedColor: '#64748B',
 
   fontFamily: 'sans',
   baseFontSize: 10,
@@ -114,6 +123,10 @@ export const DEFAULT_VISUAL_OPTIONS: VisualOptions = {
   showTaxBreakdown: true,
   showTotalInWords: false,
 
+  showBatches: true,
+  showDocBarcode: true,
+  showDocQr: true,
+
   columns: {
     code: true,
     description: true,
@@ -127,8 +140,8 @@ export const DEFAULT_VISUAL_OPTIONS: VisualOptions = {
   watermark: {
     enabled: false,
     text: 'BORRADOR',
-    color: '#cbd5e1',
-    opacity: 0.25,
+    color: '#CBD5E1',
+    opacity: 0.22,
     rotation: -30,
     fontSize: 120,
   },
@@ -137,7 +150,7 @@ export const DEFAULT_VISUAL_OPTIONS: VisualOptions = {
     text: 'Documento generado electrónicamente · {{company.name}}',
     alignment: 'center',
     showPageNumbers: false,
-    showGeneratedAt: false,
+    showGeneratedAt: true,
   },
 
   customCss: '',
