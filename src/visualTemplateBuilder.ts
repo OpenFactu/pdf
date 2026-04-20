@@ -175,13 +175,13 @@ export function buildVisualTemplate(docType: DocType, opts: VisualOptions): stri
     Number(col.lineTotal);
 
   const headerCells: string[] = [];
-  if (col.code) headerCells.push('<th style="width:8%">Código</th>');
+  if (col.code) headerCells.push('<th style="width:12%; white-space:nowrap;">Código</th>');
   if (col.description) headerCells.push('<th>Descripción</th>');
-  if (col.quantity) headerCells.push('<th class="num" style="width:8%">Cant.</th>');
-  if (col.uom) headerCells.push('<th class="num" style="width:6%">U.M.</th>');
-  if (col.price) headerCells.push('<th class="num" style="width:11%">Precio</th>');
-  if (col.iva) headerCells.push('<th class="num" style="width:7%">IVA</th>');
-  if (col.lineTotal) headerCells.push('<th class="num" style="width:13%">Total</th>');
+  if (col.quantity) headerCells.push('<th class="num" style="width:9%; white-space:nowrap;">Cant.</th>');
+  if (col.uom) headerCells.push('<th class="num" style="width:7%; white-space:nowrap;">U.M.</th>');
+  if (col.price) headerCells.push('<th class="num" style="width:13%; white-space:nowrap;">Precio</th>');
+  if (col.iva) headerCells.push('<th class="num" style="width:8%; white-space:nowrap;">IVA</th>');
+  if (col.lineTotal) headerCells.push('<th class="num" style="width:14%; white-space:nowrap;">Total</th>');
 
   const bodyCells: string[] = [];
   if (col.code) bodyCells.push('<td class="mono">{{itemCode}}</td>');
@@ -236,39 +236,38 @@ export function buildVisualTemplate(docType: DocType, opts: VisualOptions): stri
     {{/if}}`
     : '';
 
-  // === Sello + códigos de trazabilidad del documento ===
-  const traceCodesBlock =
+  // === Pie: QR + Code-128 + hash + custom text, todo integrado ===
+  const footerQr = opts.showDocQr
+    ? '<div class="page-footer__code"><img src="{{qrCode qrPayload}}" alt="QR de verificación" /><span class="page-footer__code-label">Verificación</span></div>'
+    : '';
+  const footerBc = opts.showDocBarcode
+    ? '<div class="page-footer__code page-footer__code--bc"><img src="{{barcode doc.docCode symbology=\'code128\'}}" alt="{{doc.docCode}}" /><span class="page-footer__code-label mono">{{doc.docCode}}</span></div>'
+    : '';
+
+  const footerTextBlock = opts.footer.text
+    ? `<div class="page-footer__text">${opts.footer.text}</div>`
+    : '';
+  const footerGeneratedBlock = opts.footer.showGeneratedAt
+    ? '<div class="page-footer__meta">Generado {{generatedAt}}</div>'
+    : '';
+  const footerHashBlock =
     opts.showDocBarcode || opts.showDocQr
-      ? `<aside class="doc-seal">
-      <div class="doc-seal__codes">
-        ${
-          opts.showDocQr
-            ? '<div class="doc-seal__code"><img src="{{qrCode qrPayload}}" alt="QR" /><span class="doc-seal__label">Verificación</span></div>'
-            : ''
-        }
-        ${
-          opts.showDocBarcode
-            ? '<div class="doc-seal__code doc-seal__code--bc"><img src="{{barcode doc.docCode symbology=\'code128\'}}" alt="Código" /><span class="doc-seal__label mono">{{doc.docCode}}</span></div>'
-            : ''
-        }
-      </div>
-      <div class="doc-seal__meta">
-        <div><strong>Hash:</strong> <span class="mono">{{docHash}}</span></div>
-        <div><strong>Emitido:</strong> {{generatedAt}}</div>
-      </div>
-    </aside>`
+      ? '<div class="page-footer__hash">Hash <span class="mono">{{docHash}}</span> · Emitido {{generatedAt}}</div>'
       : '';
 
-  // === Footer ===
-  const footerAlign = alignToCss(opts.footer.alignment);
-  const footerSegments: string[] = [];
-  if (opts.footer.text) footerSegments.push(`<div>${opts.footer.text}</div>`);
-  if (opts.footer.showGeneratedAt)
-    footerSegments.push('<div class="footer-meta">Generado {{generatedAt}}</div>');
-  const footerBlock =
-    footerSegments.length > 0
-      ? `<div class="page-footer" style="text-align:${footerAlign};">${footerSegments.join('')}</div>`
-      : '';
+  const hasCodes = opts.showDocQr || opts.showDocBarcode;
+  const footerBlock = `<footer class="page-footer ${hasCodes ? 'page-footer--with-codes' : ''}">
+    ${
+      hasCodes
+        ? `<div class="page-footer__codes">${footerQr}${footerBc}</div>`
+        : ''
+    }
+    <div class="page-footer__info">
+      ${footerTextBlock}
+      ${footerHashBlock}
+      ${footerGeneratedBlock}
+    </div>
+  </footer>`;
 
   // === CSS — Keirost brand guide v1.0 ===
   const css = `
@@ -385,7 +384,8 @@ export function buildVisualTemplate(docType: DocType, opts: VisualOptions): stri
   }
   thead th.num { text-align: right; }
   tbody td { padding: 9px 10px; border-bottom: 1px solid #E2E8F0; font-size: ${opts.baseFontSize - 1}pt; vertical-align: top; }
-  tbody td.num { text-align: right; font-variant-numeric: tabular-nums; font-family: ${MONO_FONT}; }
+  tbody td.num { text-align: right; font-variant-numeric: tabular-nums; font-family: ${MONO_FONT}; white-space: nowrap; }
+  tbody td.mono { white-space: nowrap; }
   tbody tr:nth-child(even) { background: #FAFBFC; }
 
   /* Chips de trazabilidad inline dentro de la descripción */
@@ -465,51 +465,54 @@ export function buildVisualTemplate(docType: DocType, opts: VisualOptions): stri
   .trace-table tbody td { padding: 4px 6px; font-size: ${opts.baseFontSize - 2}pt; border-bottom: 1px solid #F1F5F9; }
   .trace-table tbody tr:nth-child(even) { background: transparent; }
 
-  /* ---------- Sello + QR + Code-128 ---------- */
-  .doc-seal {
+  /* ---------- Pie de página (con QR + Code-128 integrados) ---------- */
+  .page-footer {
     clear: both;
     margin-top: 24px;
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-    gap: 16px;
-    border-top: 1px solid #E2E8F0;
     padding-top: 14px;
+    border-top: 1px solid #E2E8F0;
+    color: ${opts.mutedColor};
+    font-size: ${opts.baseFontSize - 2}pt;
     page-break-inside: avoid;
   }
-  .doc-seal__codes { display: flex; gap: 14px; align-items: flex-end; }
-  .doc-seal__code { display: flex; flex-direction: column; align-items: center; gap: 2px; }
-  .doc-seal__code img { height: 56px; width: auto; display: block; }
-  .doc-seal__code--bc img { height: 36px; width: 160px; }
-  .doc-seal__label {
+  .page-footer--with-codes {
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-start;
+    gap: 20px;
+  }
+  .page-footer__codes { display: flex; gap: 14px; align-items: flex-end; flex-shrink: 0; }
+  .page-footer__code { display: flex; flex-direction: column; align-items: center; gap: 2px; }
+  .page-footer__code img {
+    display: block;
+    width: 52px;
+    height: 52px;
+  }
+  .page-footer__code--bc img {
+    height: 34px;
+    width: 150px;
+  }
+  .page-footer__code-label {
     font-family: ${MONO_FONT};
     font-size: ${opts.baseFontSize - 4}pt;
     color: ${opts.mutedColor};
     text-transform: uppercase;
     letter-spacing: 1px;
   }
-  .doc-seal__meta {
+  .page-footer__info { flex: 1; min-width: 0; text-align: right; line-height: 1.55; }
+  .page-footer__text { color: ${opts.mutedColor}; }
+  .page-footer__hash {
+    margin-top: 3px;
     color: ${opts.mutedColor};
-    font-size: ${opts.baseFontSize - 2}pt;
-    text-align: right;
-    line-height: 1.6;
+    font-size: ${opts.baseFontSize - 3}pt;
   }
-  .doc-seal__meta strong {
-    color: ${opts.headerBgColor};
-    font-weight: 600;
-    letter-spacing: 0.2px;
+  .page-footer__hash .mono { color: ${opts.headerBgColor}; font-weight: 600; }
+  .page-footer__meta {
+    margin-top: 2px;
+    font-size: ${opts.baseFontSize - 3}pt;
+    font-family: ${MONO_FONT};
+    opacity: 0.75;
   }
-
-  /* ---------- Pie de página ---------- */
-  .page-footer {
-    clear: both;
-    margin-top: 18px;
-    padding-top: 10px;
-    border-top: 1px solid #E2E8F0;
-    color: ${opts.mutedColor};
-    font-size: ${opts.baseFontSize - 2}pt;
-  }
-  .footer-meta { margin-top: 3px; font-size: ${opts.baseFontSize - 3}pt; opacity: 0.8; font-family: ${MONO_FONT}; }
 
   ${opts.customCss}
   `;
@@ -579,8 +582,6 @@ ${GOOGLE_FONTS_LINK}
   ${totalInWordsBlock}
 
   ${batchSummaryBlock}
-
-  ${traceCodesBlock}
 
   ${footerBlock}
 </body>
