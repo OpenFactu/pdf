@@ -16,6 +16,14 @@ export interface RenderOptions {
   margins?: MarginPreset;
   showPageNumbers?: boolean;
   footerAlignment?: 'left' | 'center' | 'right';
+  /** Si está presente, Puppeteer pintará un footer con QR + Code-128 + meta en CADA página. */
+  pageFooter?: {
+    docCode: string;
+    docHash?: string;
+    qrPayload?: string;
+    generatedAt?: string;
+    extraText?: string;
+  };
 }
 
 const MARGIN_MM: Record<
@@ -162,6 +170,78 @@ export class PdfRenderer {
   }
 
   /**
+   * Construye el footer HTML que Puppeteer pinta en CADA página: QR + Code-128
+   * + línea meta con docCode · hash · timestamp · página X/Y. Los códigos se
+   * generan aquí como data URIs porque Puppeteer no ejecuta Handlebars en los
+   * templates de header/footer.
+   */
+  private static buildDocumentFooterTemplate(
+    meta: NonNullable<RenderOptions['pageFooter']>,
+  ): string {
+    // QR SVG data URI (mismo algoritmo que el helper Handlebars `qrCode`)
+    let qrDataUri = '';
+    try {
+      const text = meta.qrPayload || meta.docCode;
+      if (text) {
+        const qr = QRCode.create(text, { errorCorrectionLevel: 'M' });
+        const size = qr.modules.size;
+        let path = '';
+        for (let y = 0; y < size; y++) {
+          for (let x = 0; x < size; x++) {
+            if (qr.modules.get(x, y)) path += `M${x},${y}h1v1h-1z`;
+          }
+        }
+        const svg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${size} ${size}" preserveAspectRatio="xMidYMid meet" shape-rendering="crispEdges"><rect width="100%" height="100%" fill="#fff"/><path fill="#000" d="${path}"/></svg>`;
+        qrDataUri = `data:image/svg+xml;base64,${Buffer.from(svg).toString('base64')}`;
+      }
+    } catch {
+      /* noop */
+    }
+
+    // Code-128 data URI
+    let bcDataUri = '';
+    try {
+      if (meta.docCode) {
+        const svg = bwipjs.toSVG({
+          bcid: 'code128',
+          text: meta.docCode,
+          scale: 2,
+          height: 8,
+          includetext: false,
+        });
+        bcDataUri = `data:image/svg+xml;base64,${Buffer.from(svg).toString('base64')}`;
+      }
+    } catch {
+      /* noop */
+    }
+
+    const metaParts: string[] = [];
+    metaParts.push(meta.docCode);
+    if (meta.docHash) metaParts.push(`Hash&nbsp;${meta.docHash}`);
+    if (meta.generatedAt) metaParts.push(meta.generatedAt);
+    if (meta.extraText) metaParts.push(meta.extraText);
+
+    const metaLine = metaParts.join(' · ');
+
+    const qrImg = qrDataUri
+      ? `<img src="${qrDataUri}" style="width:26px;height:26px;display:block;flex-shrink:0;" />`
+      : '';
+    const bcImg = bcDataUri
+      ? `<img src="${bcDataUri}" style="height:22px;width:auto;max-width:140px;display:block;flex-shrink:0;" />`
+      : '';
+
+    return `<div style="width:100%; padding:0 10mm 4mm 10mm; font-family:'JetBrains Mono','SFMono-Regular',Menlo,monospace; font-size:7pt; color:#64748B; letter-spacing:0.3px; box-sizing:border-box;">
+  <div style="display:flex; align-items:center; gap:10px; border-top:1px solid #E2E8F0; padding-top:4mm;">
+    ${qrImg}
+    ${bcImg}
+    <span style="flex:1; text-align:right; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; text-transform:uppercase;">
+      ${metaLine} · Pág&nbsp;<span class="pageNumber"></span>/<span class="totalPages"></span>
+    </span>
+  </div>
+</div>`;
+  }
+
+  /**
    * Renderiza el HTML+Handlebars con los datos del documento y devuelve el Buffer del PDF.
    */
   public static async render(
@@ -179,18 +259,28 @@ export class PdfRenderer {
       await page.setContent(renderedHtml, { waitUntil: 'networkidle0' });
 
       const margin = options.margins ? MARGIN_MM[options.margins] : MARGIN_MM.normal;
-      const displayHeaderFooter = !!options.showPageNumbers;
+      // Si hay pageFooter con códigos, ampliamos el margen inferior para dejar
+      // hueco sin recortar el contenido. 28mm cubre QR 26px + línea meta cómoda.
+      const hasDocFooter = !!options.pageFooter;
+      const marginFinal = hasDocFooter ? { ...margin, bottom: '28mm' } : margin;
+
+      const displayHeaderFooter = hasDocFooter || !!options.showPageNumbers;
+
+      let footerTemplate: string | undefined;
+      if (hasDocFooter && options.pageFooter) {
+        footerTemplate = this.buildDocumentFooterTemplate(options.pageFooter);
+      } else if (options.showPageNumbers) {
+        footerTemplate = this.buildFooterTemplate(options.footerAlignment || 'center');
+      }
 
       const buffer = await page.pdf({
         format: (options.pageSize || 'A4') as PaperFormat,
         landscape: options.orientation === 'landscape',
         printBackground: true,
-        margin,
+        margin: marginFinal,
         displayHeaderFooter,
         headerTemplate: displayHeaderFooter ? '<span></span>' : undefined,
-        footerTemplate: displayHeaderFooter
-          ? this.buildFooterTemplate(options.footerAlignment || 'center')
-          : undefined,
+        footerTemplate,
         preferCSSPageSize: true,
       });
       return Buffer.from(buffer);
@@ -209,6 +299,20 @@ export class PdfRenderer {
       margins: opts.margins,
       showPageNumbers: opts.footer.showPageNumbers,
       footerAlignment: opts.footer.alignment,
+    };
+  }
+
+  /**
+   * Atajo para construir `pageFooter` desde el payload del documento.
+   * `renderDocumentPdf` lo llama para activar el pie per-page con QR+Code-128.
+   */
+  public static pageFooterFromPayload(payload: DocumentPdfPayload, extraText?: string) {
+    return {
+      docCode: payload.doc.docCode,
+      docHash: payload.docHash,
+      qrPayload: payload.qrPayload,
+      generatedAt: payload.generatedAt,
+      extraText,
     };
   }
 

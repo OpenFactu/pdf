@@ -31,6 +31,8 @@ export interface DocumentHeaderData {
   subtotal: number;
   taxTotal: number;
   total: number;
+  withholdingAmount?: number | null;
+  withholdingRate?: number | null;
   totalInWords: string;
   taxBreakdown: TaxBreakdownEntry[];
   billToAddress: string | null;

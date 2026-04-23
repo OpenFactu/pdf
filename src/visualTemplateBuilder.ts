@@ -236,38 +236,29 @@ export function buildVisualTemplate(docType: DocType, opts: VisualOptions): stri
     {{/if}}`
     : '';
 
-  // === Pie: QR + Code-128 + hash + custom text, todo integrado ===
+  // === Pie minimalista: QR pequeño + Code-128 + meta en una tira fina ===
   const footerQr = opts.showDocQr
-    ? '<div class="page-footer__code"><img src="{{qrCode qrPayload}}" alt="QR de verificación" /><span class="page-footer__code-label">Verificación</span></div>'
+    ? '<img class="page-footer__qr" src="{{qrCode qrPayload}}" alt="QR" />'
     : '';
   const footerBc = opts.showDocBarcode
-    ? '<div class="page-footer__code page-footer__code--bc"><img src="{{barcode doc.docCode symbology=\'code128\'}}" alt="{{doc.docCode}}" /><span class="page-footer__code-label mono">{{doc.docCode}}</span></div>'
+    ? '<img class="page-footer__bc" src="{{barcode doc.docCode symbology=\'code128\'}}" alt="{{doc.docCode}}" />'
     : '';
 
-  const footerTextBlock = opts.footer.text
-    ? `<div class="page-footer__text">${opts.footer.text}</div>`
-    : '';
-  const footerGeneratedBlock = opts.footer.showGeneratedAt
-    ? '<div class="page-footer__meta">Generado {{generatedAt}}</div>'
-    : '';
-  const footerHashBlock =
-    opts.showDocBarcode || opts.showDocQr
-      ? '<div class="page-footer__hash">Hash <span class="mono">{{docHash}}</span> · Emitido {{generatedAt}}</div>'
-      : '';
+  const metaParts: string[] = [];
+  metaParts.push('{{doc.docCode}}');
+  if (opts.showDocBarcode || opts.showDocQr) metaParts.push('Hash&nbsp;{{docHash}}');
+  if (opts.footer.showGeneratedAt) metaParts.push('{{generatedAt}}');
+  if (opts.footer.text) metaParts.push(opts.footer.text);
+  const footerMeta = `<span class="page-footer__meta">${metaParts.join(' · ')}</span>`;
 
   const hasCodes = opts.showDocQr || opts.showDocBarcode;
-  const footerBlock = `<footer class="page-footer ${hasCodes ? 'page-footer--with-codes' : ''}">
-    ${
-      hasCodes
-        ? `<div class="page-footer__codes">${footerQr}${footerBc}</div>`
-        : ''
-    }
-    <div class="page-footer__info">
-      ${footerTextBlock}
-      ${footerHashBlock}
-      ${footerGeneratedBlock}
-    </div>
-  </footer>`;
+  const footerBlock = hasCodes || metaParts.length > 0
+    ? `<footer class="page-footer">
+    ${footerQr}
+    ${footerBc}
+    ${footerMeta}
+  </footer>`
+    : '';
 
   // === CSS — Keirost brand guide v1.0 ===
   const css = `
@@ -436,6 +427,77 @@ export function buildVisualTemplate(docType: DocType, opts: VisualOptions): stri
     border-radius: 2px;
   }
 
+  /* ---------- Firma del representante ---------- */
+  .signature-block {
+    clear: both;
+    margin-top: 24px;
+    padding: 10px 0;
+    width: 240px;
+    page-break-inside: avoid;
+  }
+  .signature-image {
+    max-height: 64px;
+    max-width: 200px;
+    display: block;
+    margin-bottom: 4px;
+  }
+  .signature-line {
+    border-top: 1px solid ${opts.headerBgColor};
+    margin-top: 40px;
+    margin-bottom: 4px;
+  }
+  .signature-meta {
+    border-top: 1px solid #E2E8F0;
+    padding-top: 4px;
+  }
+  .signature-name {
+    font-family: ${DISPLAY_FONT};
+    font-size: ${opts.baseFontSize}pt;
+    font-weight: 600;
+    color: ${opts.headerBgColor};
+  }
+  .signature-role {
+    color: ${opts.mutedColor};
+    font-size: ${opts.baseFontSize - 2}pt;
+    margin-top: 1px;
+  }
+
+  /* ---------- Datos bancarios para transferencia ---------- */
+  .bank-info {
+    clear: both;
+    margin-top: 18px;
+    padding: 10px 14px;
+    background: ${opts.accentColor}0A;
+    border-left: 3px solid ${opts.accentColor};
+    border-radius: 2px;
+    page-break-inside: avoid;
+  }
+  .bank-info__label {
+    font-family: ${MONO_FONT};
+    font-size: ${opts.baseFontSize - 3}pt;
+    text-transform: uppercase;
+    letter-spacing: 1.5px;
+    color: ${opts.mutedColor};
+    margin-bottom: 4px;
+  }
+  .bank-info__row {
+    display: flex;
+    gap: 10px;
+    font-size: ${opts.baseFontSize - 1}pt;
+    color: ${opts.headerBgColor};
+  }
+  .bank-info__key {
+    min-width: 50px;
+    color: ${opts.mutedColor};
+    font-weight: 600;
+  }
+  .bank-info__val {
+    color: ${opts.headerBgColor};
+  }
+  .bank-info__val.mono {
+    font-family: ${MONO_FONT};
+  }
+
   /* ---------- Bloque de trazabilidad agregada ---------- */
   .trace-block {
     clear: both;
@@ -465,53 +527,33 @@ export function buildVisualTemplate(docType: DocType, opts: VisualOptions): stri
   .trace-table tbody td { padding: 4px 6px; font-size: ${opts.baseFontSize - 2}pt; border-bottom: 1px solid #F1F5F9; }
   .trace-table tbody tr:nth-child(even) { background: transparent; }
 
-  /* ---------- Pie de página (con QR + Code-128 integrados) ---------- */
+  /* ---------- Pie minimalista (una línea, QR + Code-128 + meta mono) ---------- */
   .page-footer {
-    clear: both;
-    margin-top: 24px;
-    padding-top: 14px;
-    border-top: 1px solid #E2E8F0;
-    color: ${opts.mutedColor};
-    font-size: ${opts.baseFontSize - 2}pt;
-    page-break-inside: avoid;
-  }
-  .page-footer--with-codes {
     display: flex;
-    justify-content: space-between;
-    align-items: flex-start;
-    gap: 20px;
-  }
-  .page-footer__codes { display: flex; gap: 14px; align-items: flex-end; flex-shrink: 0; }
-  .page-footer__code { display: flex; flex-direction: column; align-items: center; gap: 2px; }
-  .page-footer__code img {
-    display: block;
-    width: 52px;
-    height: 52px;
-  }
-  .page-footer__code--bc img {
-    height: 34px;
-    width: 150px;
-  }
-  .page-footer__code-label {
+    align-items: center;
+    gap: 12px;
+    margin-top: 20px;
+    padding-top: 10px;
+    border-top: 1px solid #E2E8F0;
+    page-break-inside: avoid;
     font-family: ${MONO_FONT};
-    font-size: ${opts.baseFontSize - 4}pt;
-    color: ${opts.mutedColor};
-    text-transform: uppercase;
-    letter-spacing: 1px;
-  }
-  .page-footer__info { flex: 1; min-width: 0; text-align: right; line-height: 1.55; }
-  .page-footer__text { color: ${opts.mutedColor}; }
-  .page-footer__hash {
-    margin-top: 3px;
-    color: ${opts.mutedColor};
     font-size: ${opts.baseFontSize - 3}pt;
+    color: ${opts.mutedColor};
+    letter-spacing: 0.2px;
   }
-  .page-footer__hash .mono { color: ${opts.headerBgColor}; font-weight: 600; }
+  .page-footer__qr {
+    width: 32px; height: 32px; display: block; flex-shrink: 0;
+  }
+  .page-footer__bc {
+    height: 26px; width: auto; max-width: 160px; display: block; flex-shrink: 0;
+  }
   .page-footer__meta {
-    margin-top: 2px;
-    font-size: ${opts.baseFontSize - 3}pt;
-    font-family: ${MONO_FONT};
-    opacity: 0.75;
+    flex: 1;
+    text-align: right;
+    text-transform: uppercase;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
   }
 
   ${opts.customCss}
@@ -576,14 +618,69 @@ ${GOOGLE_FONTS_LINK}
   <div class="totals">
     <div class="row"><span>Base imponible:</span><span>{{formatCurrency doc.subtotal}}</span></div>
     ${taxBreakdownBlock}
+    {{#if doc.withholdingAmount}}
+    <div class="row" style="color:${opts.mutedColor};"><span>Retención IRPF{{#if doc.withholdingRate}} ({{doc.withholdingRate}}%){{/if}}:</span><span>− {{formatCurrency doc.withholdingAmount}}</span></div>
+    {{/if}}
     <div class="row grand"><span>TOTAL</span><span>{{formatCurrency doc.total}}</span></div>
   </div>
 
   ${totalInWordsBlock}
 
-  ${batchSummaryBlock}
+  ${
+    opts.showCustomFields
+      ? `
+  {{#if doc.customFields}}
+  <section class="custom-fields" style="margin-top:18px;border-top:1px dashed ${opts.mutedColor};padding-top:12px;">
+    <div style="font-size:9px;font-weight:700;text-transform:uppercase;letter-spacing:0.08em;color:${opts.mutedColor};margin-bottom:6px;">
+      ${opts.customFieldsLabel || 'Datos adicionales'}
+    </div>
+    <div style="display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:4px 16px;font-size:10px;">
+      {{#each doc.customFields}}
+      <div style="display:flex;justify-content:space-between;gap:12px;">
+        <span style="color:${opts.mutedColor};">{{@key}}</span>
+        <span style="font-weight:600;text-align:right;word-break:break-word;">{{this}}</span>
+      </div>
+      {{/each}}
+    </div>
+  </section>
+  {{/if}}
+  `
+      : ''
+  }
 
-  ${footerBlock}
+  {{#if company.signature.show}}
+  <section class="signature-block">
+    {{#if company.signature.imageUrl}}
+    <img class="signature-image" src="{{company.signature.imageUrl}}" alt="Firma" />
+    {{else}}
+    <div class="signature-line"></div>
+    {{/if}}
+    <div class="signature-meta">
+      <div class="signature-name">{{company.signature.name}}</div>
+      {{#if company.signature.role}}<div class="signature-role">{{company.signature.role}}</div>{{/if}}
+    </div>
+  </section>
+  {{/if}}
+
+  {{#if company.iban}}
+  <section class="bank-info">
+    <div class="bank-info__label">Datos para transferencia</div>
+    <div class="bank-info__row">
+      <span class="bank-info__key">IBAN</span>
+      <span class="bank-info__val mono">{{company.iban}}</span>
+    </div>
+    {{#if company.bankName}}
+    <div class="bank-info__row"><span class="bank-info__key">Banco</span><span class="bank-info__val">{{company.bankName}}</span></div>
+    {{/if}}
+    {{#if company.bankSwift}}
+    <div class="bank-info__row"><span class="bank-info__key">SWIFT</span><span class="bank-info__val mono">{{company.bankSwift}}</span></div>
+    {{/if}}
+  </section>
+  {{/if}}
+
+  ${batchSummaryBlock}
+  {{!-- El pie con QR + Code-128 + hash se renderiza vía Puppeteer footerTemplate --}}
+  {{!-- en CADA página. No se incluye aquí para evitar duplicación. --}}
 </body>
 </html>`;
 }

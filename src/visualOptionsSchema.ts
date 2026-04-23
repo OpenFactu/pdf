@@ -84,6 +84,14 @@ export interface VisualOptions {
   // Pie de página
   footer: FooterOptions;
 
+  // Campos personalizados
+  /** Si true, pinta un bloque "Datos adicionales" con los `doc.customFields`
+   *  presentes (claves y valores tal cual). Si está desactivado, solo se
+   *  muestran si el template los referencia manualmente via Handlebars. */
+  showCustomFields: boolean;
+  /** Etiqueta del bloque. */
+  customFieldsLabel: string;
+
   // Escape hatch
   customCss: string;
 }
@@ -147,11 +155,14 @@ export const DEFAULT_VISUAL_OPTIONS: VisualOptions = {
   },
 
   footer: {
-    text: 'Documento generado electrónicamente · {{company.name}}',
+    text: '',
     alignment: 'center',
-    showPageNumbers: false,
+    showPageNumbers: true,
     showGeneratedAt: true,
   },
+
+  showCustomFields: true,
+  customFieldsLabel: 'Datos adicionales',
 
   customCss: '',
 };
