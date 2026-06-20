@@ -94,7 +94,9 @@ export class PdfRenderer {
             if (qr.modules.get(x, y)) path += `M${x},${y}h1v1h-1z`;
           }
         }
-        const svg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${size} ${size}" preserveAspectRatio="none" shape-rendering="crispEdges"><rect width="100%" height="100%" fill="#fff"/><path fill="#000" d="${path}"/></svg>`;
+        // `xMidYMid meet` evita que el QR se deforme cuando el contenedor no es
+        // cuadrado (un QR estirado puede volverse ilegible para el lector).
+        const svg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${size} ${size}" preserveAspectRatio="xMidYMid meet" shape-rendering="crispEdges"><rect width="100%" height="100%" fill="#fff"/><path fill="#000" d="${path}"/></svg>`;
         return new Handlebars.SafeString(
           `data:image/svg+xml;base64,${Buffer.from(svg).toString('base64')}`,
         );
@@ -105,25 +107,88 @@ export class PdfRenderer {
 
     // Barcode 1D — usa bwip-js a SVG.
     Handlebars.registerHelper('barcode', function (this: any, value: any, options: any) {
-      try {
-        const text = String(value ?? '');
-        if (!text) return new Handlebars.SafeString('');
-        const hash = options?.hash || {};
-        const symbology = (hash.symbology as string) || 'code128';
-        const includeText = Boolean(hash.includeText);
+      const hash = options?.hash || {};
+      let symbology = (hash.symbology as string) || 'code128';
+      const includeText = Boolean(hash.includeText);
+      const text = String(value ?? '');
+
+      // Detecta la simbología más adecuada cuando `symbology="auto"`. Usa el
+      // algoritmo mod-10 estándar de EAN/UPC para validar el dígito de control;
+      // cualquier cosa que no encaje cae a Code 128 (universal). Sin esto, pasar
+      // `bcid:'auto'` a bwip-js lanza `unknown encoder name: auto`.
+      const computeMod10 = (digits: string): number => {
+        let sum = 0;
+        for (let i = 0; i < digits.length; i++) {
+          const d = parseInt(digits[i], 10);
+          const weight = (digits.length - i) % 2 === 0 ? 1 : 3;
+          sum += d * weight;
+        }
+        return (10 - (sum % 10)) % 10;
+      };
+      const detectSymbology = (txt: string): string => {
+        if (!/^\d+$/.test(txt)) return 'code128';
+        if (txt.length === 13) {
+          return computeMod10(txt.slice(0, 12)) === parseInt(txt[12], 10) ? 'ean13' : 'code128';
+        }
+        if (txt.length === 12) {
+          return computeMod10(txt.slice(0, 11)) === parseInt(txt[11], 10) ? 'upca' : 'code128';
+        }
+        if (txt.length === 8) {
+          return computeMod10(txt.slice(0, 7)) === parseInt(txt[7], 10) ? 'ean8' : 'code128';
+        }
+        if (txt.length === 14) return 'itf14';
+        return 'code128';
+      };
+      if (symbology === 'auto') {
+        symbology = detectSymbology(text);
+      }
+
+      // Genera el SVG para un bcid concreto. Separarlo permite reintentar con
+      // code128 cuando una simbología estricta (EAN-13/EAN-8/UPC-A) rechaza el
+      // valor por longitud o checksum.
+      const tryRender = (bcid: string, txt: string): string => {
         const svg = bwipjs.toSVG({
-          bcid: symbology,
-          text,
+          bcid,
+          text: txt,
           scale: 2,
           height: 10,
           includetext: includeText,
           textxalign: 'center',
         });
+        return `data:image/svg+xml;base64,${Buffer.from(svg).toString('base64')}`;
+      };
+
+      // Sin valor → placeholder VISIBLE (no un hueco silencioso) para que el
+      // diseñador detecte que el campo origen llegó vacío.
+      if (!text) {
+        const svg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 200 40"><rect width="200" height="40" fill="#fee2e2" stroke="#dc2626" stroke-width="1"/><text x="100" y="25" font-family="monospace" font-size="11" fill="#991b1b" text-anchor="middle">barcode vacío</text></svg>`;
         return new Handlebars.SafeString(
           `data:image/svg+xml;base64,${Buffer.from(svg).toString('base64')}`,
         );
-      } catch {
-        return new Handlebars.SafeString('');
+      }
+
+      // 1) Simbología pedida/detectada.
+      try {
+        return new Handlebars.SafeString(tryRender(symbology, text));
+      } catch (err: any) {
+        console.warn(
+          `[barcode helper] ${symbology} falló para "${text}": ${err?.message || err}. Reintentando con code128.`,
+        );
+      }
+
+      // 2) Fallback: code128 acepta cualquier ASCII y casi nunca falla, así una
+      // etiqueta no sale en blanco por una incompatibilidad de longitud/checksum.
+      try {
+        return new Handlebars.SafeString(tryRender('code128', text));
+      } catch (err: any) {
+        console.error('[barcode helper] code128 fallback también falló:', err?.message || err);
+        const msg = String(err?.message || err)
+          .slice(0, 60)
+          .replace(/[<>&]/g, '');
+        const svg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 320 40"><rect width="320" height="40" fill="#fee2e2" stroke="#dc2626" stroke-width="1"/><text x="160" y="25" font-family="monospace" font-size="10" fill="#991b1b" text-anchor="middle">⚠ ${msg}</text></svg>`;
+        return new Handlebars.SafeString(
+          `data:image/svg+xml;base64,${Buffer.from(svg).toString('base64')}`,
+        );
       }
     });
 
